@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true">
+        <layer-list>
+            <!-- Фон выбранного элемента -->
+            <item android:drawable="@drawable/selected_item_background" />
+            <!-- Отступ для иконки -->
+            <item
+                android:top="8dp" />
+        </layer-list>
+    </item>
+    <item>
+        <!-- Фон невыбранного элемента -->
+        <!--<color android:color="" />-->
+    </item>
+</selector>
