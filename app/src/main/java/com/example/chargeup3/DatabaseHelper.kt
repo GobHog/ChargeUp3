@@ -17,7 +17,6 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
                 time_relax INTEGER NOT NULL
             )
         """
-
         val createExerciseTable = """
             CREATE TABLE exercise (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -27,17 +26,14 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
                 FOREIGN KEY (workout_id) REFERENCES workout(id)
             )
         """
-
         db.execSQL(createWorkoutTable)
         db.execSQL(createExerciseTable)
     }
-
     // Этот метод вызывается, если версия базы данных изменилась
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion == 3) {
         }
     }
-
     companion object {
         private const val DATABASE_NAME = "workout_db" // Имя базы данных
         private const val DATABASE_VERSION = 3        // Версия базы данных увеличена до 2
