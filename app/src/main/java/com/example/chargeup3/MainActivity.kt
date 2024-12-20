@@ -10,6 +10,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,13 +27,16 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,6 +50,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -118,6 +124,15 @@ fun Main() {
                         // Скрываем панель навигации при переходе на экран упражнений
                         navBarViewModel.setShowNavBar(false)
                         ExercisesScreen(workoutId = workoutId, db = db, navController=navController)
+                    }
+                    composable(
+                        route = "workout_session/{workoutId}",
+                        arguments = listOf(navArgument("workoutId") { type = NavType.IntType })
+                    ) { backStackEntry ->
+                        val workoutId = backStackEntry.arguments?.getInt("workoutId") ?: return@composable
+                        val workout = getWorkoutById(db, workoutId)
+                        val exercises = getExercisesByWorkoutId(db, workoutId)
+                        WorkoutSessionScreen(workout, exercises, navController)
                     }
                 }
             }
@@ -444,21 +459,6 @@ fun getWorkoutTime(db: SQLiteDatabase, workoutId: Int): String {
         "0"
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 @SuppressLint("Range")
 fun getExercisesByWorkoutId(db: SQLiteDatabase, workoutId: Int): List<Exercise> {
     val exercises = mutableListOf<Exercise>()
@@ -488,94 +488,327 @@ fun getWorkoutRelaxTime(db: SQLiteDatabase, workoutId: Int): Int {
         0
     }.also { cursor.close() }
 }
+// Где-нибудь в вашем коде, например в том же файле, вне @Composable
+val OswaldFontFamily = FontFamily(Font(R.font.oswald))
+
 @Composable
 fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navController: NavController) {
-    // Состояния для текущего индекса упражнения, состояния отдыха и текущего времени
     val currentExerciseIndex = remember { mutableStateOf(0) }
     val isResting = remember { mutableStateOf(false) }
     val currentTime = remember { mutableStateOf(0) }
-    val totalTime = remember { mutableStateOf(workout.timeWork + workout.timeRelax) }
+    val totalTime = remember { mutableStateOf(0) }
+    val isPaused = remember { mutableStateOf(false) }
+    val trainingEnded = remember { mutableStateOf(false) }
 
-    // Таймер для отслеживания времени работы и отдыха
-    LaunchedEffect(currentExerciseIndex.value, isResting.value) {
-        val duration = if (isResting.value) {
-            workout.timeRelax // Время отдыха
-        } else {
-            workout.timeWork // Время работы
-        }
+    val isPreparation = remember { mutableStateOf(true) }
+    val preStartTime = remember { mutableStateOf(10) }
 
-        currentTime.value = duration
-        while (currentTime.value > 0) {
-            delay(1000L) // Каждую секунду уменьшаем текущее время
-            currentTime.value -= 1
-            totalTime.value = (totalTime.value - 1).coerceAtLeast(0) // Обновляем общее время
-        }
+    val maxTime = remember { exercises.size * workout.timeWork }
 
-        if (!isResting.value) {
-            isResting.value = true // Переход на отдых
-        } else {
-            isResting.value = false // Переход на следующее упражнение
-            if (currentExerciseIndex.value < exercises.size - 1) {
-                currentExerciseIndex.value += 1 // Переход к следующему упражнению
-            } else {
-                // Завершаем тренировку, если все упражнения выполнены
-                navController.popBackStack()
+    // Счётчик общего прошедшего времени
+    val elapsedTime = remember { mutableStateOf(0) }
+
+    // Когда подготовка заканчивается, начинаем считать общее время
+    LaunchedEffect(isPreparation.value) {
+        if (!isPreparation.value && !trainingEnded.value) {
+            while (!trainingEnded.value) {
+                delay(1000L)
+                elapsedTime.value += 1
             }
         }
     }
 
-    // UI для WorkoutSessionScreen
-    Column(
-        modifier = Modifier
-            .fillMaxSize() // Заполняет весь экран
-            .background(Color.Black) // Черный фон для экрана
-            .padding(16.dp) // Отступы вокруг всего контента
-    ) {
-        // Отображение общего времени тренировки
-        Text(
-            text = "Общее время: ${totalTime.value} сек",
-            color = Color.White,
-            fontSize = 20.sp,
-            modifier = Modifier.align(Alignment.CenterHorizontally)
+    val context = LocalContext.current
+    val topImageRes = if (isResting.value) {
+        R.drawable.rest_image
+    } else {
+        val exercise = exercises.getOrNull(currentExerciseIndex.value)
+        val imageName = exercise?.imagePath ?: "default_exercise_image"
+        val drawableId = context.resources.getIdentifier(imageName, "drawable", context.packageName)
+        if (drawableId != 0) drawableId else R.drawable.default_exercise_image
+    }
+
+    // Обратный отсчёт перед началом
+    LaunchedEffect(Unit) {
+        while (preStartTime.value > 0 && isPreparation.value) {
+            delay(1000L)
+            preStartTime.value -= 1
+        }
+        if (preStartTime.value == 0) {
+            isPreparation.value = false
+        }
+    }
+
+    // Логика тренировки
+    LaunchedEffect(currentExerciseIndex.value, isResting.value, isPreparation.value) {
+        if (!isPreparation.value && !trainingEnded.value) {
+            val duration = if (isResting.value) workout.timeRelax else workout.timeWork
+
+            currentTime.value = duration
+            while (currentTime.value > 0) {
+                val startTime = System.currentTimeMillis()
+                while (System.currentTimeMillis() - startTime < 1000) {
+                    delay(100L)
+                    while (isPaused.value) {
+                        delay(100L)
+                    }
+                }
+
+                currentTime.value -= 1
+                if (!isResting.value) {
+                    totalTime.value += 1
+                }
+            }
+
+            if (!isResting.value) {
+                // Закончили упражнение
+                if (currentExerciseIndex.value < exercises.size - 1) {
+                    isResting.value = true
+                } else {
+                    trainingEnded.value = true
+                }
+            } else {
+                // Закончили отдых
+                isResting.value = false
+                if (currentExerciseIndex.value < exercises.size - 1) {
+                    currentExerciseIndex.value += 1
+                } else {
+                    trainingEnded.value = true
+                }
+            }
+        }
+    }
+
+    val progress = if (maxTime > 0) totalTime.value.toFloat() / maxTime.toFloat() else 0f
+
+    // Форматирование затраченного времени (elapsedTime) в мм:сс
+    val minutes = elapsedTime.value / 60
+    val seconds = elapsedTime.value % 60
+    val formattedTime = String.format("%d:%02d", minutes, seconds)
+
+    // Диалог завершения тренировки
+    if (trainingEnded.value) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = null,
+            text = {
+                // Вся кастомная разметка внутри text
+                Box(
+                    modifier = Modifier
+                        .size(width = 336.dp, height = 525.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.ic_completed),
+                            contentDescription = null,
+                            modifier = Modifier.size(100.dp)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Image(
+                            painter = painterResource(id = R.drawable.txt_congratulation),
+                            contentDescription = null,
+                            modifier = Modifier.size(200.dp) // подберите нужный размер
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Вы выполнили тренировку: ${workout.name}",
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Normal,
+                            fontFamily = OswaldFontFamily
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Затраченное время: $formattedTime",
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Normal,
+                            fontFamily = OswaldFontFamily
+                        )
+                        Spacer(modifier = Modifier.height(32.dp))
+                        // Кнопка "Закрыть"
+                        TextButton(onClick = { navController.popBackStack() }) {
+                            Text(
+                                text = "Закрыть",
+                                color = Color.White,
+                                fontSize = 20.sp,
+                                fontFamily = OswaldFontFamily
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {}, // Не используем стандартные кнопки
+            dismissButton = {},
+            shape = RoundedCornerShape(25.dp),
+            containerColor = Color(0xFF282828)
         )
+    }
 
-        Spacer(modifier = Modifier.height(16.dp)) // Отступ между текстом и следующим элементом
-
-        // Отображение текущего состояния (упражнение или отдых)
-        Text(
-            text = if (isResting.value) "Отдых" else exercises.getOrNull(currentExerciseIndex.value)?.name ?: "Завершено",
-            color = Color.White,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.align(Alignment.CenterHorizontally)
-        )
-
-        Spacer(modifier = Modifier.height(16.dp)) // Отступ
-
-        // Отображение оставшегося времени (секунды)
-        Text(
-            text = "${currentTime.value} сек",
-            color = Color.White,
-            fontSize = 48.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.align(Alignment.CenterHorizontally)
-        )
-
-        Spacer(modifier = Modifier.height(32.dp)) // Отступ перед кнопкой завершения
-
-        // Кнопка для завершения тренировки
-        Button(
-            onClick = { navController.popBackStack() }, // Возвращаемся на предыдущий экран
+    if (isPreparation.value && !trainingEnded.value) {
+        // Экран подготовки
+        Column(
             modifier = Modifier
-                .fillMaxWidth() // Кнопка на всю ширину
-                .padding(16.dp)
-                .clip(RoundedCornerShape(16.dp)), // Скругляем углы
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0264F6)) // Цвет кнопки
+                .fillMaxSize()
+                .background(Color.Black),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Text(text = "Завершить тренировку", color = Color.White, fontSize = 16.sp) // Текст на кнопке
+            Text(
+                text = "Приготовьтесь",
+                color = Color(0xFF0264F6),
+                fontSize = 48.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = OswaldFontFamily
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "${preStartTime.value}",
+                color = Color(0xFF0264F6),
+                fontSize = 96.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = OswaldFontFamily
+            )
+        }
+    } else if (!trainingEnded.value) {
+        // Основной экран тренировки
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            // Верхняя картинка (524dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(524.dp)
+                    .clip(RoundedCornerShape(bottomStart = 25.dp, bottomEnd = 25.dp))
+            ) {
+                Image(
+                    painter = painterResource(id = topImageRes),
+                    contentDescription = "Top Image",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+
+                // Кнопка завершения тренировки (верхняя)
+                Image(
+                    painter = painterResource(id = R.drawable.ic_close_workout),
+                    contentDescription = "Завершить тренировку",
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(16.dp)
+                        .size(48.dp)
+                        .clickable {
+                            navController.popBackStack()
+                        }
+                )
+
+                // Название упражнения или "Отдых"
+                Text(
+                    text = if (isResting.value) "Отдых" else exercises.getOrNull(currentExerciseIndex.value)?.name ?: "Завершено",
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = OswaldFontFamily,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(16.dp)
+                )
+            }
+
+            // Отступ в 20 dp между картинкой и нижним контейнером
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Контейнер снизу
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(365.dp)
+                    .clip(RoundedCornerShape(topStart = 25.dp, topEnd = 25.dp))
+                    .background(Color(0xFF202020))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    // Прогрессбар
+                    LinearProgressIndicator(
+                        progress = progress.coerceIn(0f, 1f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp)),
+                        color = Color(0xFF0264F6),
+                        trackColor = Color.Gray
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Общее время
+                    Text(
+                        text = "Общее время: ${totalTime.value} сек",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = OswaldFontFamily
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Текущее время
+                    Text(
+                        text = "${currentTime.value} сек",
+                        color = Color.White,
+                        fontSize = 48.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = OswaldFontFamily
+                    )
+
+                    Spacer(modifier = Modifier.height(32.dp))
+
+                    // Кнопка паузы
+                    val pauseIcon = if (isPaused.value) R.drawable.ic_play else R.drawable.ic_pause
+                    Image(
+                        painter = painterResource(id = pauseIcon),
+                        contentDescription = if (isPaused.value) "Продолжить" else "Пауза",
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clickable {
+                                isPaused.value = !isPaused.value
+                            }
+                    )
+                }
+            }
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 @Composable
 fun NavigationGraph(navController: NavHostController) {
