@@ -46,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -93,7 +94,7 @@ fun Main() {
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             bottomBar = {
-                // Показываем/скрываем панель навигации в зависимости от состояния
+                // Show/hide bottom navigation based on ViewModel state
                 if (navBarViewModel.showNavBar.value) {
                     BottomNavigationBar(navController = navController)
                 }
@@ -102,10 +103,10 @@ fun Main() {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(paddingValues) // Используем paddingValues, переданные в Scaffold
+                    .padding(paddingValues) // Apply padding from Scaffold
             ) {
                 NavHost(
-                    navController,
+                    navController = navController,
                     startDestination = NavRoutes.Home.route,
                     modifier = Modifier.weight(1f)
                 ) {
@@ -121,9 +122,9 @@ fun Main() {
                         arguments = listOf(navArgument("workoutId") { type = NavType.IntType })
                     ) { backStackEntry ->
                         val workoutId = backStackEntry.arguments?.getInt("workoutId") ?: 0
-                        // Скрываем панель навигации при переходе на экран упражнений
+                        // Hide bottom navigation when on ExercisesScreen
                         navBarViewModel.setShowNavBar(false)
-                        ExercisesScreen(workoutId = workoutId, db = db, navController=navController)
+                        ExercisesScreen(workoutId = workoutId, db = db, navController = navController)
                     }
                     composable(
                         route = "workout_session/{workoutId}",
@@ -132,6 +133,8 @@ fun Main() {
                         val workoutId = backStackEntry.arguments?.getInt("workoutId") ?: return@composable
                         val workout = getWorkoutById(db, workoutId)
                         val exercises = getExercisesByWorkoutId(db, workoutId)
+                        // Show bottom navigation during workout session if desired
+                        navBarViewModel.setShowNavBar(false)
                         WorkoutSessionScreen(workout, exercises, navController)
                     }
                 }
@@ -139,6 +142,7 @@ fun Main() {
         }
     }
 }
+
 @Composable
 fun BottomNavigationBar(navController: NavController, modifier: Modifier = Modifier) {
     NavigationBar(
@@ -238,7 +242,7 @@ fun Home(navController: NavController, workouts: List<Workout>) {
     LazyColumn {
         items(workouts) { workout ->
             WorkoutItem(workout = workout) {
-                workoutId -> navController.navigate("exercises/$workoutId")
+                    workoutId -> navController.navigate("exercises/$workoutId")
             }
         }
     }
@@ -261,7 +265,7 @@ fun WorkoutItem(workout: Workout, onClick: (Int) -> Unit) {
             .clip(RoundedCornerShape(16.dp)) // Скругляем углы
             .background(Color.Gray) // Фон кнопки (можно заменить на другой цвет)
             .clickable { onClick(workout.id) } // Обработчик клика
-            //.align(Alignment.CenterHorizontally) // Центрируем по ширине
+        //.align(Alignment.CenterHorizontally) // Центрируем по ширине
     ) {
         Image(
             painter = painterResource(id = imageRes),
@@ -345,109 +349,256 @@ sealed class NavRoutes(val route: String) {
 }
 @Composable
 fun ExercisesScreen(workoutId: Int, db: SQLiteDatabase, navController: NavController) {
-    // Получаем упражнения, связанные с workoutId
+    // Retrieve the Workout data
+    val workout = remember { getWorkoutById(db, workoutId) }
     val exercises = remember { getExercisesByWorkoutId(db, workoutId) }
 
-    // Получаем время упражнения из таблицы workout
+    // Retrieve workout times
     val workoutTime = remember { getWorkoutTime(db, workoutId) }
 
-    // Контейнер для всего контента с черным фоном
+    // Main UI
     Column(
         modifier = Modifier
-            .fillMaxSize() // Занимает весь экран
-            .background(Color.Black) // Черный фон для всей страницы
-            .padding(16.dp) // Отступы вокруг всего контента
+            .fillMaxSize()
+            .background(Color.Black)
+            .padding(16.dp) // Overall padding for the screen
     ) {
-        // Оборачиваем LazyColumn в Box с закругленными углами
+        // Workout Image with Back Button
         Box(
             modifier = Modifier
-                .fillMaxWidth() // Занимает всю ширину экрана
-                .clip(RoundedCornerShape(16.dp)) // Закругленные углы
-                .background(Color(0xFF656566)) // Цвет фона LazyColumn в формате HEX
-                .padding(8.dp) // Отступы внутри контейнера Box
-                .weight(1f) // Отнимаем пространство, чтобы кнопка не зашла за LazyColumn
+                .fillMaxWidth()
+                .height(244.dp) // Set height to 244dp
+                .padding( top = 35.dp) // Adjusted left and top padding
         ) {
-            // Лист упражнений
-            LazyColumn(
+            // Workout Image with Rounded Corners
+            Image(
+                painter = painterResource(id = getImageResId(workout.imagePath)),
+                contentDescription = "Workout Image",
                 modifier = Modifier
-                    .fillMaxWidth() // Занимает всю ширину
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(25.dp)) // Apply rounded corners
+                    .align(Alignment.CenterStart), // Align to the start
+                contentScale = ContentScale.Crop
+            )
+
+            // Back button overlay (unchanged)
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .align(Alignment.TopStart)
+                     // Semi-transparent background
+                    .clickable {
+                        navController.popBackStack()
+                        // Optionally, show the navigation bar again if needed
+                        // navBarViewModel.setShowNavBar(true)
+                    }
+                    .padding(8.dp) // Padding inside the back button box
             ) {
-                items(exercises) { exercise ->
-                    val imageRes = exercise.imagePath?.let {
-                        LocalContext.current.resources.getIdentifier(it, "drawable", LocalContext.current.packageName)
-                            .takeIf { resId -> resId != 0 } ?: R.drawable.img_power_simple
-                    } ?: R.drawable.img_power_simple
+                Image(
+                    painter = painterResource(id = R.drawable.ic_back),
+                    contentDescription = "Back",
+                    modifier = Modifier.fillMaxSize() // Tint the back icon to white
+                )
+            }
+        }
 
-                    // Каждый элемент списка с изображением
-                    Row(
-                        modifier = Modifier
-                            .padding(vertical = 10.dp) // Вертикальные отступы между элементами
-                            .fillMaxWidth()
-                    ) {
-                        // Изображение упражнения
-                        Box(
-                            modifier = Modifier
-                                .padding(start = 37.dp) // Отступ слева от LazyColumn
-                                .size(120.dp, 99.dp) // Устанавливаем размер изображения
-                                .clip(RoundedCornerShape(8.dp)) // Закругленные углы
-                                .background(Color.Gray) // Фон для изображения (можно настроить)
-                        ) {
-                            Image(
-                                painter = painterResource(id = imageRes),
-                                contentDescription = "Exercise Image",
-                                contentScale = ContentScale.Crop, // Кадрируем изображение, чтобы оно заполнило Box
-                                modifier = Modifier.fillMaxSize() // Изображение заполняет весь контейнер
-                            )
-                        }
+        // Spacer between image and exercises list
+        Spacer(modifier = Modifier.height(16.dp))
 
-                        // Текст упражнения и время
-                        Column(
-                            modifier = Modifier
-                                .padding(start = 10.dp) // Отступ слева от изображения
-                                .align(Alignment.Top) // Выравнивание по верхнему краю
-                        ) {
-                            // Название упражнения
-                            Text(
-                                text = exercise.name ?: "Название упражнения",
-                                color = Color.White,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+        // Exercises Container with "Упражнения" and "Перерыв - [time_relax] сек"
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp)) // Rounded corners for the container
+                .background(Color(0xFF656566)) // Background color
+                .padding(16.dp) // Padding inside the container
+                .weight(1f) // Occupies remaining space
+        ) {
+            Column {
+                // Title "Упражнения"
+                Text(
+                    text = "Упражнения",
+                    color = Color.White,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = OswaldFontFamily,
+                    modifier = Modifier.padding(bottom = 8.dp) // Spacing below the title
+                )
 
-                            // Время упражнения
-                            Text(
-                                text = "Время: $workoutTime сек",
-                                color = Color.Gray,
-                                fontSize = 14.sp
-                            )
-                        }
+                // Subtitle "Перерыв - [time_relax] сек"
+                Text(
+                    text = "Перерыв - ${workout.timeRelax} сек",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Medium,
+                    fontFamily = OswaldFontFamily,
+                    modifier = Modifier.padding(bottom = 16.dp) // Spacing below the subtitle
+                )
+
+                // Exercises List
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(exercises) { exercise ->
+                        ExerciseItem(exercise = exercise, workoutTime = workoutTime)
                     }
                 }
             }
         }
 
-        // Кнопка "Начать зарядку"
+        // Start Workout Button
         Button(
             onClick = {
-                navController.navigate("workout_session/${workoutId}") // Переход с передачей workoutId
+                navController.navigate("workout_session/$workoutId") // Navigate to workout session
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
+                .padding(horizontal = 20.dp, vertical = 16.dp) // Padding around the button
                 .height(48.dp)
-                .clip(RoundedCornerShape(16.dp)),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0264F6))
+                .clip(RoundedCornerShape(16.dp)), // Rounded corners for the button
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0264F6)) // Button color
         ) {
             Text(
                 text = "Начать зарядку",
                 color = Color.White,
                 fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                fontFamily = OswaldFontFamily
+            )
+        }
+    }
+
+    // Composable for each Exercise Item
+    @Composable
+    fun ExerciseItem(exercise: Exercise, workoutTime: String) {
+        val context = LocalContext.current
+        val imageRes = getImageResId(exercise.imagePath)
+
+        Row(
+            modifier = Modifier
+                .padding(vertical = 10.dp)
+                .fillMaxWidth()
+        ) {
+            // Exercise Image
+            Box(
+                modifier = Modifier
+                    .size(width = 120.dp, height = 99.dp)
+                    .clip(RoundedCornerShape(8.dp)) // Rounded corners for exercise image
+                    .background(Color.Gray) // Background color
+            ) {
+                Image(
+                    painter = painterResource(id = imageRes),
+                    contentDescription = "Exercise Image",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            // Exercise Name and Time
+            Column(
+                modifier = Modifier
+                    .padding(start = 10.dp)
+                    .align(Alignment.CenterVertically) // Center vertically
+            ) {
+                // Exercise Name
+                Text(
+                    text = exercise.name,
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = OswaldFontFamily
+                )
+
+                // Exercise Time
+                Text(
+                    text = "Время: $workoutTime сек",
+                    color = Color.Gray,
+                    fontSize = 14.sp,
+                    fontFamily = OswaldFontFamily
+                )
+            }
+        }
+    }
+
+    // Helper function to get image resource ID from imagePath
+    @Composable
+    fun getImageResId(imagePath: String?): Int {
+        val context = LocalContext.current
+        return imagePath?.let {
+            context.resources.getIdentifier(it, "drawable", context.packageName)
+                .takeIf { resId -> resId != 0 } ?: R.drawable.img_power_simple
+        } ?: R.drawable.img_power_simple
+    }
+}
+
+
+// Composable for each Exercise Item
+@Composable
+fun ExerciseItem(exercise: Exercise, workoutTime: String) {
+    val context = LocalContext.current
+    val imageRes = exercise.imagePath?.let {
+        context.resources.getIdentifier(it, "drawable", context.packageName)
+            .takeIf { resId -> resId != 0 } ?: R.drawable.img_power_simple
+    } ?: R.drawable.img_power_simple
+
+    Row(
+        modifier = Modifier
+            .padding(vertical = 10.dp)
+            .fillMaxWidth()
+    ) {
+        // Exercise Image
+        Box(
+            modifier = Modifier
+                .size(width = 120.dp, height = 99.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.Gray)
+        ) {
+            Image(
+                painter = painterResource(id = imageRes),
+                contentDescription = "Exercise Image",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
             )
         }
 
+        // Exercise Name and Time
+        Column(
+            modifier = Modifier
+                .padding(start = 10.dp)
+                .align(Alignment.CenterVertically) // Center vertically
+        ) {
+            // Exercise Name
+            Text(
+                text = exercise.name,
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = OswaldFontFamily
+            )
+
+            // Exercise Time
+            Text(
+                text = "Время: $workoutTime сек",
+                color = Color.Gray,
+                fontSize = 14.sp,
+                fontFamily = OswaldFontFamily
+            )
+        }
     }
 }
+
+
+
+// Helper function to get image resource ID from imagePath
+@Composable
+fun getImageResId(imagePath: String?): Int {
+    val context = LocalContext.current
+    return imagePath?.let {
+        context.resources.getIdentifier(it, "drawable", context.packageName)
+            .takeIf { resId -> resId != 0 } ?: R.drawable.img_power_simple
+    } ?: R.drawable.img_power_simple
+}
+
 
 @SuppressLint("Range")
 fun getWorkoutTime(db: SQLiteDatabase, workoutId: Int): String {
@@ -493,6 +644,7 @@ val OswaldFontFamily = FontFamily(Font(R.font.oswald))
 
 @Composable
 fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navController: NavController) {
+    // State variables for workout session
     val currentExerciseIndex = remember { mutableStateOf(0) }
     val isResting = remember { mutableStateOf(false) }
     val currentTime = remember { mutableStateOf(0) }
@@ -505,10 +657,10 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
 
     val maxTime = remember { exercises.size * workout.timeWork }
 
-    // Счётчик общего прошедшего времени
+    // Elapsed time counter
     val elapsedTime = remember { mutableStateOf(0) }
 
-    // Когда подготовка заканчивается, начинаем считать общее время
+    // Start counting elapsed time after preparation
     LaunchedEffect(isPreparation.value) {
         if (!isPreparation.value && !trainingEnded.value) {
             while (!trainingEnded.value) {
@@ -528,7 +680,7 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
         if (drawableId != 0) drawableId else R.drawable.default_exercise_image
     }
 
-    // Обратный отсчёт перед началом
+    // Preparation countdown
     LaunchedEffect(Unit) {
         while (preStartTime.value > 0 && isPreparation.value) {
             delay(1000L)
@@ -539,7 +691,7 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
         }
     }
 
-    // Логика тренировки
+    // Workout logic
     LaunchedEffect(currentExerciseIndex.value, isResting.value, isPreparation.value) {
         if (!isPreparation.value && !trainingEnded.value) {
             val duration = if (isResting.value) workout.timeRelax else workout.timeWork
@@ -561,14 +713,14 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
             }
 
             if (!isResting.value) {
-                // Закончили упражнение
+                // Ended exercise, start rest or finish
                 if (currentExerciseIndex.value < exercises.size - 1) {
                     isResting.value = true
                 } else {
                     trainingEnded.value = true
                 }
             } else {
-                // Закончили отдых
+                // Ended rest, move to next exercise or finish
                 isResting.value = false
                 if (currentExerciseIndex.value < exercises.size - 1) {
                     currentExerciseIndex.value += 1
@@ -581,18 +733,18 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
 
     val progress = if (maxTime > 0) totalTime.value.toFloat() / maxTime.toFloat() else 0f
 
-    // Форматирование затраченного времени (elapsedTime) в мм:сс
+    // Format elapsed time
     val minutes = elapsedTime.value / 60
     val seconds = elapsedTime.value % 60
     val formattedTime = String.format("%d:%02d", minutes, seconds)
 
-    // Диалог завершения тренировки
+    // Dialog for training completion
     if (trainingEnded.value) {
         AlertDialog(
             onDismissRequest = { },
             title = null,
             text = {
-                // Вся кастомная разметка внутри text
+                // Custom layout inside the dialog
                 Box(
                     modifier = Modifier
                         .size(width = 336.dp, height = 525.dp)
@@ -613,7 +765,7 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
                         Image(
                             painter = painterResource(id = R.drawable.txt_congratulation),
                             contentDescription = null,
-                            modifier = Modifier.size(200.dp) // подберите нужный размер
+                            modifier = Modifier.size(200.dp) // Adjust size as needed
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
@@ -632,7 +784,7 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
                             fontFamily = OswaldFontFamily
                         )
                         Spacer(modifier = Modifier.height(32.dp))
-                        // Кнопка "Закрыть"
+                        // Close button
                         TextButton(onClick = { navController.popBackStack() }) {
                             Text(
                                 text = "Закрыть",
@@ -644,7 +796,7 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
                     }
                 }
             },
-            confirmButton = {}, // Не используем стандартные кнопки
+            confirmButton = {}, // No standard buttons
             dismissButton = {},
             shape = RoundedCornerShape(25.dp),
             containerColor = Color(0xFF282828)
@@ -652,7 +804,7 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
     }
 
     if (isPreparation.value && !trainingEnded.value) {
-        // Экран подготовки
+        // Preparation screen
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -677,13 +829,13 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
             )
         }
     } else if (!trainingEnded.value) {
-        // Основной экран тренировки
+        // Main workout screen
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black)
         ) {
-            // Верхняя картинка (524dp)
+            // Top Image
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -697,7 +849,7 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
                     contentScale = ContentScale.Crop
                 )
 
-                // Кнопка завершения тренировки (верхняя)
+                // Close Workout Button
                 Image(
                     painter = painterResource(id = R.drawable.ic_close_workout),
                     contentDescription = "Завершить тренировку",
@@ -710,9 +862,12 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
                         }
                 )
 
-                // Название упражнения или "Отдых"
+                // Exercise Name or "Rest"
                 Text(
-                    text = if (isResting.value) "Отдых" else exercises.getOrNull(currentExerciseIndex.value)?.name ?: "Завершено",
+                    text = if (isResting.value) "Отдых" else exercises.getOrNull(
+                        currentExerciseIndex.value
+                    )?.name
+                        ?: "Завершено",
                     color = Color.White,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
@@ -723,10 +878,10 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
                 )
             }
 
-            // Отступ в 20 dp между картинкой и нижним контейнером
+            // Spacer between image and bottom container
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Контейнер снизу
+            // Bottom Container
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -741,7 +896,7 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    // Прогрессбар
+                    // Progress Bar
                     LinearProgressIndicator(
                         progress = progress.coerceIn(0f, 1f),
                         modifier = Modifier
@@ -754,7 +909,7 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Общее время
+                    // Total Time
                     Text(
                         text = "Общее время: ${totalTime.value} сек",
                         color = Color.White,
@@ -765,7 +920,7 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Текущее время
+                    // Current Time
                     Text(
                         text = "${currentTime.value} сек",
                         color = Color.White,
@@ -776,7 +931,7 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
 
                     Spacer(modifier = Modifier.height(32.dp))
 
-                    // Кнопка паузы
+                    // Pause Button
                     val pauseIcon = if (isPaused.value) R.drawable.ic_play else R.drawable.ic_pause
                     Image(
                         painter = painterResource(id = pauseIcon),
@@ -789,42 +944,6 @@ fun WorkoutSessionScreen(workout: Workout, exercises: List<Exercise>, navControl
                     )
                 }
             }
-        }
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-@Composable
-fun NavigationGraph(navController: NavHostController) {
-    NavHost(
-        navController = navController,
-        startDestination = "workoutSession"
-    ) {
-        composable("workoutSession") {
-            val workout = Workout(1, "Full Body", "path1.jpg", 20, 10)
-            val exercises = listOf(
-                Exercise(1, "Push-Ups", "path2.jpg", 1),
-                Exercise(2, "Squats", "path3.jpg", 1),
-                Exercise(3, "Plank", "path4.jpg", 1)
-            )
-
-            WorkoutSessionScreen(workout, exercises, navController)
         }
     }
 }
